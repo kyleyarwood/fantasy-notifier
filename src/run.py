@@ -5,15 +5,26 @@ import os
 import pytz
 import yahoo_fantasy_api as yfa
 
+from decimal import Decimal
 from dotenv import load_dotenv
+from twilio.rest import Client
 from yahoo_oauth import OAuth2
 
 load_dotenv()
+
+# OAUTH FILE
 OAUTH_FILENAME = os.environ.get("OAUTH_FILENAME")
+
+# DYNAMODB
 DB = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
 TABLE = DB.Table(TABLE_NAME)
-PRIMARY_KEY = os.environ.get('DYNAMODB_PRIMARY_KEY')
+PRIMARY_KEY = os.environ.get('DYNAMODB_TABLE_PRIMARY_KEY')
+
+# TWILIO
+ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_CLIENT = Client(ACCOUNT_SID, AUTH_TOKEN)
 
 
 def create_oauth_file():
@@ -67,7 +78,7 @@ def get_exceptional_free_agents(league, player_ids):
     for stats in player_stats:
         fantasy_points = get_fantasy_points_from_stats(stats)
         if fantasy_points >= EXCEPTiONAL_FANTASY_POINTS:
-            exceptional_free_agents.append((stats['name'], fantasy_points))
+            exceptional_free_agents.append((stats['name'], stats['player_id'], fantasy_points))
     return exceptional_free_agents
 
 
@@ -99,7 +110,7 @@ def update_table(player_id, date, fantasy_points):
     Key = {PRIMARY_KEY: key}
     AttributeUpdates = {
         'fantasy_points': {
-            'Value': fantasy_points,
+            'Value': Decimal(fantasy_points),
             'Action': 'PUT',
         }
     }
@@ -111,17 +122,24 @@ def update_table(player_id, date, fantasy_points):
 
 def write_to_table(player_id, date, fantasy_points):
     key = get_key(player_id, date)
-    Item = {PRIMARY_KEY: key, 'fantasy_points': fantasy_points}
+    Item = {PRIMARY_KEY: key, 'fantasy_points': Decimal(fantasy_points)}
     TABLE.put_item(Item=Item)
 
 
 def send_twilio_message(name, fantasy_points, update):
+    fp = int(fantasy_points)
     message = (
-        f'{name} has scored {fantasy_points} today!' if not update else
-        f'{name} has scored again! {fantasy_points} points today!'
+        f'{name} has scored {fp} fantasy points today!' if not update else
+        f'{name} has scored again! {fp} fantasy points today!'
     )
-    pass
-
+    TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
+    USER_PHONE_NUMBER = os.environ.get("USER_PHONE_NUMBER")
+    message = TWILIO_CLIENT.messages.create(
+        body=message,
+        from_=TWILIO_PHONE_NUMBER,
+        to=USER_PHONE_NUMBER,
+    )
+    return message.sid
 
 def send_notification(name, player_id, date, fantasy_points, update):
     if update:
@@ -141,11 +159,11 @@ def send_notifications_for_exceptional_free_agents(exceptional_free_agents):
         )
         if current:
             continue
-        send_notification(name, id, today, fantasy_points, update=any)
+        sid = send_notification(name, id, today, fantasy_points, update=any)
+        print(sid)
 
 
 def main():
-    load_dotenv()
     if not does_oauth_file_exist:
         create_oauth_file()
     league = get_league_of_interest()
@@ -154,7 +172,7 @@ def main():
     player_ids = get_free_agent_player_ids(league)
     exceptional_free_agents = get_exceptional_free_agents(league, player_ids)
     print(exceptional_free_agents)
-    send_notifications_for_exceptional_free_agents()
+    send_notifications_for_exceptional_free_agents(exceptional_free_agents)
 
 
 if __name__ == "__main__":
