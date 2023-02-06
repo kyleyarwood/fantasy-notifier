@@ -129,3 +129,5 @@ dmypy.json
 .pyre/
 
 oauth2.json
+my-sourcecode-function/
+secrets.json

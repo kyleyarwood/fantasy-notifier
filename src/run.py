@@ -164,7 +164,7 @@ def send_notifications_for_exceptional_free_agents(exceptional_free_agents):
 
 
 def main():
-    if not does_oauth_file_exist:
+    if not does_oauth_file_exist():
         create_oauth_file()
     league = get_league_of_interest()
     if league is None:
